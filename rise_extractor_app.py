@@ -7,10 +7,20 @@ import io
 from collections import Counter
 import os
 import tempfile
+import traceback
+import sys
 
-# Import the IMSCC creator module
-# Make sure imscc_creator.py is in the same directory as this script
-import imscc_creator
+# Setup error logging
+st.write("Starting application initialization...")
+
+# Import the IMSCC creator module with error handling
+try:
+    import imscc_creator
+    st.success("Successfully imported imscc_creator module")
+except Exception as e:
+    st.error(f"Failed to import imscc_creator: {str(e)}")
+    st.code(traceback.format_exc())
+    st.warning("The application may not function correctly without the imscc_creator module.")
 
 def extract_jsonp_content(file_content):
     """
@@ -23,26 +33,39 @@ def extract_jsonp_content(file_content):
     Returns:
         str: Extracted base64 content or None if not found
     """
-    # Pattern to match __resolveJsonp("course:und","....") format
-    pattern = r'__resolveJsonp\("course:und","([^"]+)"\)'
-    match = re.search(pattern, file_content)
-    
-    if match:
-        return match.group(1)
-    
-    # Debug information
-    st.error("Failed to extract base64 content from the file")
-    st.write("First 200 characters of file:")
-    st.code(file_content[:200])
-    
-    # Try more flexible pattern as fallback
-    alternative_pattern = r'__resolveJsonp\([^,]+,\s*"([^"]+)"\)'
-    alt_match = re.search(alternative_pattern, file_content)
-    if alt_match:
-        st.info("Found content with alternative pattern, trying that instead...")
-        return alt_match.group(1)
-    
-    return None
+    try:
+        # Pattern to match __resolveJsonp("course:und","....") format
+        pattern = r'__resolveJsonp\("course:und","([^"]+)"\)'
+        match = re.search(pattern, file_content)
+        
+        if match:
+            return match.group(1)
+        
+        # Debug information
+        st.error("Failed to extract base64 content with primary pattern")
+        st.write("First 200 characters of file:")
+        st.code(file_content[:200])
+        
+        # Try more flexible pattern as fallback
+        alternative_pattern = r'__resolveJsonp\([^,]+,\s*"([^"]+)"\)'
+        alt_match = re.search(alternative_pattern, file_content)
+        if alt_match:
+            st.info("Found content with alternative pattern, trying that instead...")
+            return alt_match.group(1)
+        
+        # Try even more flexible pattern as last resort
+        last_resort_pattern = r'__resolveJsonp\(.*?,\s*"([A-Za-z0-9+/=]+)"\)'
+        last_match = re.search(last_resort_pattern, file_content)
+        if last_match:
+            st.info("Found content with last resort pattern, attempting to use...")
+            return last_match.group(1)
+            
+        st.error("Could not extract content with any pattern")
+        return None
+    except Exception as e:
+        st.error(f"Error in extract_jsonp_content: {str(e)}")
+        st.code(traceback.format_exc())
+        return None
 
 def decode_base64_content(base64_content):
     """
@@ -57,16 +80,46 @@ def decode_base64_content(base64_content):
     try:
         # Decode base64 to get JSON string
         decoded_bytes = base64.b64decode(base64_content)
-        json_str = decoded_bytes.decode('utf-8')
+        st.success("Successfully decoded base64 content")
+        
+        try:
+            json_str = decoded_bytes.decode('utf-8')
+            st.success("Successfully converted to UTF-8 string")
+        except UnicodeDecodeError:
+            st.error("Failed to decode as UTF-8, trying alternate encodings")
+            # Try alternate encodings
+            for encoding in ['latin-1', 'iso-8859-1', 'windows-1252']:
+                try:
+                    json_str = decoded_bytes.decode(encoding)
+                    st.success(f"Successfully decoded using {encoding}")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                st.error("Could not decode with any encoding")
+                return None
         
         # Parse JSON string
-        json_data = json.loads(json_str)
-        return json_data
-    except Exception as e:
-        st.error(f"Error decoding content: {str(e)}")
+        try:
+            json_data = json.loads(json_str)
+            st.success("Successfully parsed JSON data")
+            return json_data
+        except json.JSONDecodeError as je:
+            st.error(f"JSON parsing error: {str(je)}")
+            # Show partial JSON for debugging
+            st.write("First 500 characters of decoded content:")
+            st.code(json_str[:500])
+            return None
+            
+    except base64.binascii.Error as be:
+        st.error(f"Base64 decoding error: {str(be)}")
         # Try to show the first part of the base64 string for debugging
         st.write("First 50 characters of base64 content:")
         st.code(base64_content[:50])
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error in decode_base64_content: {str(e)}")
+        st.code(traceback.format_exc())
         return None
 
 def analyze_json_structure(json_data):
@@ -79,32 +132,37 @@ def analyze_json_structure(json_data):
     Returns:
         dict: Information about the JSON structure
     """
-    structure_info = {
-        "top_level_keys": list(json_data.keys()),
-        "list_fields": [],
-        "potential_lesson_arrays": []
-    }
-    
-    # Find all fields that are lists
-    for key, value in json_data.items():
-        if isinstance(value, list):
-            list_info = {
-                "key": key,
-                "length": len(value),
-                "sample_keys": []
-            }
-            
-            # Get sample keys from the first item if it's a dictionary
-            if len(value) > 0 and isinstance(value[0], dict):
-                list_info["sample_keys"] = list(value[0].keys())
+    try:
+        structure_info = {
+            "top_level_keys": list(json_data.keys()),
+            "list_fields": [],
+            "potential_lesson_arrays": []
+        }
+        
+        # Find all fields that are lists
+        for key, value in json_data.items():
+            if isinstance(value, list):
+                list_info = {
+                    "key": key,
+                    "length": len(value),
+                    "sample_keys": []
+                }
                 
-                # Check if this might be a lesson array
-                if 'title' in value[0] or 'id' in value[0]:
-                    structure_info["potential_lesson_arrays"].append(key)
-            
-            structure_info["list_fields"].append(list_info)
-    
-    return structure_info
+                # Get sample keys from the first item if it's a dictionary
+                if len(value) > 0 and isinstance(value[0], dict):
+                    list_info["sample_keys"] = list(value[0].keys())
+                    
+                    # Check if this might be a lesson array
+                    if 'title' in value[0] or 'id' in value[0]:
+                        structure_info["potential_lesson_arrays"].append(key)
+                
+                structure_info["list_fields"].append(list_info)
+        
+        return structure_info
+    except Exception as e:
+        st.error(f"Error in analyze_json_structure: {str(e)}")
+        st.code(traceback.format_exc())
+        return {"error": str(e)}
 
 def extract_lesson_data(json_data, debug=False):
     """
@@ -117,117 +175,126 @@ def extract_lesson_data(json_data, debug=False):
     Returns:
         list: List of dictionaries containing title and id for each lesson
     """
-    if debug:
-        # Analyze and display JSON structure
-        structure_info = analyze_json_structure(json_data)
-        st.write("### JSON Structure Analysis")
-        st.write("Top level keys:", structure_info["top_level_keys"])
-        
-        if structure_info["potential_lesson_arrays"]:
-            st.write("Potential lesson arrays found:", structure_info["potential_lesson_arrays"])
-        else:
-            st.warning("No obvious lesson arrays found in the top level")
-    
-    lessons_data = []
-    lessons = None
-    
-    # Method 1: Direct lookup for 'lessons' key
-    if 'lessons' in json_data:
-        lessons = json_data['lessons']
+    try:
         if debug:
-            st.success(f"Found direct 'lessons' key with {len(lessons)} items")
-    
-    # Method 2: Look for arrays that might contain lessons
-    if not lessons:
-        candidates = []
-        for key, value in json_data.items():
-            if isinstance(value, list) and len(value) > 0:
-                # Check first few items to see if they look like lessons
-                sample_size = min(5, len(value))
-                sample_items = value[:sample_size]
-                
-                has_title_id = sum(1 for item in sample_items 
-                                 if isinstance(item, dict) and 'title' in item and 'id' in item)
-                
-                if has_title_id > 0:
-                    candidates.append((key, value, has_title_id/sample_size))
+            # Analyze and display JSON structure
+            structure_info = analyze_json_structure(json_data)
+            st.write("### JSON Structure Analysis")
+            st.write("Top level keys:", structure_info["top_level_keys"])
+            
+            if structure_info["potential_lesson_arrays"]:
+                st.write("Potential lesson arrays found:", structure_info["potential_lesson_arrays"])
+            else:
+                st.warning("No obvious lesson arrays found in the top level")
         
-        # Sort candidates by the proportion that have title and id
-        candidates.sort(key=lambda x: x[2], reverse=True)
+        lessons_data = []
+        lessons = None
         
-        if candidates:
-            best_candidate = candidates[0]
-            lessons = best_candidate[1]
+        # Method 1: Direct lookup for 'lessons' key
+        if 'lessons' in json_data:
+            lessons = json_data['lessons']
             if debug:
-                st.success(f"Found potential lessons array in '{best_candidate[0]}' with {len(lessons)} items")
-                st.write(f"Match confidence: {best_candidate[2]*100:.1f}%")
-    
-    # Method 3: Deep search for arrays of objects with title and id
-    if not lessons and debug:
-        st.info("Performing deep search for lesson-like objects...")
+                st.success(f"Found direct 'lessons' key with {len(lessons)} items")
         
-        def find_lesson_arrays(obj, path="root"):
-            results = []
+        # Method 2: Look for arrays that might contain lessons
+        if not lessons:
+            candidates = []
+            for key, value in json_data.items():
+                if isinstance(value, list) and len(value) > 0:
+                    # Check first few items to see if they look like lessons
+                    sample_size = min(5, len(value))
+                    sample_items = value[:sample_size]
+                    
+                    has_title_id = sum(1 for item in sample_items 
+                                     if isinstance(item, dict) and ('title' in item or 'id' in item))
+                    
+                    if has_title_id > 0:
+                        candidates.append((key, value, has_title_id/sample_size))
             
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    new_path = f"{path}.{key}"
-                    results.extend(find_lesson_arrays(value, new_path))
+            # Sort candidates by the proportion that have title and id
+            candidates.sort(key=lambda x: x[2], reverse=True)
             
-            elif isinstance(obj, list) and len(obj) > 0 and isinstance(obj[0], dict):
-                # Check if this array has items with title and id
-                sample_size = min(5, len(obj))
-                sample_items = obj[:sample_size]
-                has_title_id = sum(1 for item in sample_items 
-                                if 'title' in item and 'id' in item)
-                
-                if has_title_id > 0:
-                    results.append((path, obj, has_title_id/sample_size))
-                
-                # Also check children
-                for i, item in enumerate(obj[:3]):  # Only check first few items
-                    results.extend(find_lesson_arrays(item, f"{path}[{i}]"))
-            
-            return results
+            if candidates:
+                best_candidate = candidates[0]
+                lessons = best_candidate[1]
+                if debug:
+                    st.success(f"Found potential lessons array in '{best_candidate[0]}' with {len(lessons)} items")
+                    st.write(f"Match confidence: {best_candidate[2]*100:.1f}%")
         
-        deep_candidates = find_lesson_arrays(json_data)
-        deep_candidates.sort(key=lambda x: x[2], reverse=True)
-        
-        if deep_candidates:
-            st.write("Found nested lesson-like arrays:")
-            for path, arr, confidence in deep_candidates[:3]:
-                st.write(f"- Path: {path}, Items: {len(arr)}, Confidence: {confidence*100:.1f}%")
+        # Method 3: Deep search for arrays of objects with title and id
+        if not lessons and debug:
+            st.info("Performing deep search for lesson-like objects...")
             
-            best_deep = deep_candidates[0]
-            if not lessons:  # Only use if we haven't found lessons yet
-                lessons = best_deep[1]
-                st.success(f"Using deep search result: {best_deep[0]}")
-    
-    # Extract data from the lessons if found
-    if lessons:
-        for lesson in lessons:
-            if isinstance(lesson, dict):
-                lesson_data = {}
+            def find_lesson_arrays(obj, path="root"):
+                results = []
                 
-                # Always include id and title if available
-                if 'id' in lesson:
-                    lesson_data['id'] = lesson['id']
-                if 'title' in lesson:
-                    lesson_data['title'] = lesson['title']
+                if isinstance(obj, dict):
+                    for key, value in obj.items():
+                        new_path = f"{path}.{key}"
+                        results.extend(find_lesson_arrays(value, new_path))
                 
-                # Only add if we have at least an id
-                if 'id' in lesson_data:
-                    lessons_data.append(lesson_data)
-    
-    # Debug: If no lessons found, show sample data
-    if debug and not lessons_data:
-        st.error("No lesson data could be extracted")
+                elif isinstance(obj, list) and len(obj) > 0 and isinstance(obj[0], dict):
+                    # Check if this array has items with title and id
+                    sample_size = min(5, len(obj))
+                    sample_items = obj[:sample_size]
+                    has_title_id = sum(1 for item in sample_items 
+                                    if ('title' in item or 'id' in item))
+                    
+                    if has_title_id > 0:
+                        results.append((path, obj, has_title_id/sample_size))
+                    
+                    # Also check children
+                    for i, item in enumerate(obj[:3]):  # Only check first few items
+                        results.extend(find_lesson_arrays(item, f"{path}[{i}]"))
+                
+                return results
+            
+            deep_candidates = find_lesson_arrays(json_data)
+            deep_candidates.sort(key=lambda x: x[2], reverse=True)
+            
+            if deep_candidates:
+                st.write("Found nested lesson-like arrays:")
+                for path, arr, confidence in deep_candidates[:3]:
+                    st.write(f"- Path: {path}, Items: {len(arr)}, Confidence: {confidence*100:.1f}%")
+                
+                best_deep = deep_candidates[0]
+                if not lessons:  # Only use if we haven't found lessons yet
+                    lessons = best_deep[1]
+                    st.success(f"Using deep search result: {best_deep[0]}")
         
-        # Show a sample of the JSON structure for troubleshooting
-        st.write("### Sample of JSON Data")
-        st.json(json.dumps(json_data, indent=2)[:1000] + "...")
-    
-    return lessons_data
+        # Extract data from the lessons if found
+        if lessons:
+            for lesson in lessons:
+                if isinstance(lesson, dict):
+                    lesson_data = {}
+                    
+                    # Always include id and title if available
+                    if 'id' in lesson:
+                        lesson_data['id'] = lesson['id']
+                    if 'title' in lesson:
+                        lesson_data['title'] = lesson['title']
+                    
+                    # Only add if we have at least an id
+                    if 'id' in lesson_data:
+                        lessons_data.append(lesson_data)
+        
+        # Debug: If no lessons found, show sample data
+        if debug and not lessons_data:
+            st.error("No lesson data could be extracted")
+            
+            # Show a sample of the JSON structure for troubleshooting
+            st.write("### Sample of JSON Data")
+            try:
+                st.json(json.dumps(json_data, indent=2)[:1000] + "...")
+            except:
+                st.write("Could not display JSON sample")
+                st.write("JSON type:", type(json_data))
+        
+        return lessons_data
+    except Exception as e:
+        st.error(f"Error in extract_lesson_data: {str(e)}")
+        st.code(traceback.format_exc())
+        return []
 
 def get_downloadable_csv(lessons_data):
     """
@@ -239,204 +306,235 @@ def get_downloadable_csv(lessons_data):
     Returns:
         str: CSV data as a string
     """
-    df = pd.DataFrame(lessons_data)
-    csv = df.to_csv(index=False)
-    return csv
+    try:
+        df = pd.DataFrame(lessons_data)
+        csv = df.to_csv(index=False)
+        return csv
+    except Exception as e:
+        st.error(f"Error creating CSV: {str(e)}")
+        st.code(traceback.format_exc())
+        return "Error generating CSV"
 
 def main():
-    st.set_page_config(
-        page_title="Rise Course Extractor",
-        page_icon="📚",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    try:
+        st.set_page_config(
+            page_title="Rise Course Extractor",
+            page_icon="📚",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
 
-    st.title("Rise Course Lesson Extractor & IMSCC Creator")
-    
-    st.markdown("""
-    ## Extract Rise course content and create LMS-compatible packages
-    
-    This tool helps you:
-    1. **Extract lesson information** from Rise course files
-    2. **Create IMS Common Cartridge packages** for importing into Learning Management Systems
-    3. **Link your Rise content** through iframes in the LMS
-    
-    ### Instructions
-    
-    1. Find the `und.js` file in your published Rise course files
-       - This is typically in the `data/` folder of your exported SCORM package
-       - It contains the encoded course structure and lesson data
-    
-    2. Upload the file using the file uploader below
-    
-    3. The tool will extract lesson information and display it in a table
-    
-    4. Optionally create an IMSCC package by providing a base URL
-       - The base URL will be combined with each lesson ID
-       - Each lesson will be a page with an iframe pointing to the content
-    """)
-    
-    # Add debug mode checkbox
-    debug_mode = st.checkbox("Enable debug mode", value=False)
-    
-    uploaded_file = st.file_uploader("Choose your und.js file", type=['js'])
-    
-    if uploaded_file is not None:
-        # Read file content
-        file_content = uploaded_file.getvalue().decode('utf-8')
+        st.title("Rise Course Lesson Extractor & IMSCC Creator")
         
-        # Show file info in debug mode
-        if debug_mode:
-            file_size = len(file_content)
-            st.write(f"File size: {file_size} bytes")
-            st.write("File preview (first 200 characters):")
-            st.code(file_content[:200])
+        st.markdown("""
+        ## Extract Rise course content and create LMS-compatible packages
         
-        # Extract base64 content
-        base64_content = extract_jsonp_content(file_content)
+        This tool helps you:
+        1. **Extract lesson information** from Rise course files
+        2. **Create IMS Common Cartridge packages** for importing into Learning Management Systems
+        3. **Link your Rise content** through iframes in the LMS
+        """)
         
-        if base64_content:
-            if debug_mode:
-                st.write(f"Base64 content length: {len(base64_content)} bytes")
-                st.write("Base64 preview (first 50 characters):")
-                st.code(base64_content[:50])
+        with st.expander("Where to find the und.js file"):
+            st.markdown("""
+            1. Find the `und.js` file in your published Rise course files
+               - This is typically in the `data/` folder of your exported SCORM package
+               - It contains the encoded course structure and lesson data
             
-            with st.spinner("Decoding and extracting lesson data..."):
-                # Decode base64 to get JSON
-                json_data = decode_base64_content(base64_content)
+            2. Upload the file using the file uploader below
+            
+            3. The tool will extract lesson information and display it in a table
+            
+            4. Optionally create an IMSCC package by providing a base URL
+               - The base URL will be combined with each lesson ID
+               - Each lesson will be a page with an iframe pointing to the content
+            """)
+        
+        # Add debug mode checkbox
+        debug_mode = st.checkbox("Enable debug mode", value=True)
+        
+        uploaded_file = st.file_uploader("Choose your und.js file", type=['js'])
+        
+        if uploaded_file is not None:
+            try:
+                # Check file size
+                file_size = len(uploaded_file.getvalue())
+                st.info(f"File size: {file_size/1024:.1f} KB")
                 
-                if json_data:
-                    # Extract lesson titles and IDs with debug info if enabled
-                    lessons_data = extract_lesson_data(json_data, debug=debug_mode)
+                if file_size > 10_000_000:  # 10MB
+                    st.warning(f"File is {file_size/1_000_000:.1f}MB. Large files may cause performance issues.")
+                
+                # Read file content
+                file_content = uploaded_file.getvalue().decode('utf-8')
+                
+                # Quick validation
+                if not "__resolveJsonp" in file_content[:1000]:
+                    st.warning("This may not be a valid Rise und.js file. It doesn't contain the expected pattern.")
+                
+                # Show file info in debug mode
+                if debug_mode:
+                    st.write("File preview (first 200 characters):")
+                    st.code(file_content[:200])
+                
+                # Extract base64 content
+                st.info("Extracting content from file...")
+                base64_content = extract_jsonp_content(file_content)
+                
+                if base64_content:
+                    if debug_mode:
+                        st.write(f"Base64 content length: {len(base64_content)} bytes")
+                        st.write("Base64 preview (first 50 characters):")
+                        st.code(base64_content[:50])
                     
-                    if lessons_data:
-                        st.success(f"Successfully extracted {len(lessons_data)} lessons!")
+                    with st.spinner("Decoding and extracting lesson data..."):
+                        # Decode base64 to get JSON
+                        st.info("Decoding base64 content...")
+                        json_data = decode_base64_content(base64_content)
                         
-                        # Get course title if available
-                        course_title = "Rise Course Export"
-                        if 'title' in json_data:
-                            course_title = json_data['title']
-                        
-                        # Display in a table
-                        st.write("### Extracted Lesson Information:")
-                        lesson_df = pd.DataFrame(lessons_data)
-                        st.dataframe(lesson_df)
-                        
-                        # Provide download links
-                        csv = get_downloadable_csv(lessons_data)
-                        st.download_button(
-                            label="Download as CSV",
-                            data=csv,
-                            file_name="lesson_data.csv",
-                            mime="text/csv"
-                        )
-                        
-                        # Text output option
-                        text_output = "\n".join([f"{lesson.get('title', 'No Title')} - {lesson['id']}" 
-                                               for lesson in lessons_data if 'id' in lesson])
-                        st.download_button(
-                            label="Download as Text",
-                            data=text_output,
-                            file_name="lesson_data.txt",
-                            mime="text/plain"
-                        )
-                        
-                        # IMSCC creation section
-                        st.write("### Create IMS Common Cartridge")
-                        st.write("""
-                        You can create an IMS Common Cartridge (.imscc) file that contains a page for each lesson.
-                        Each page will have an iframe that loads the lesson content using the base URL you provide.
-                        """)
-                        
-                        base_url = st.text_input(
-                            "Base URL for iframes (will be combined with lesson IDs)",
-                            placeholder="https://example.com/rise/scorm/"
-                        )
-                        
-                        custom_title = st.text_input(
-                            "Course title (optional)",
-                            value=course_title
-                        )
-                        
-                        if st.button("Create IMSCC Package"):
-                            if not base_url:
-                                st.error("Please provide a base URL for the iframes.")
+                        if json_data:
+                            # Extract lesson titles and IDs with debug info if enabled
+                            st.info("Extracting lesson data...")
+                            lessons_data = extract_lesson_data(json_data, debug=debug_mode)
+                            
+                            if lessons_data:
+                                st.success(f"Successfully extracted {len(lessons_data)} lessons!")
+                                
+                                # Get course title if available
+                                course_title = "Rise Course Export"
+                                if isinstance(json_data, dict) and 'title' in json_data:
+                                    course_title = json_data['title']
+                                
+                                # Display in a table
+                                st.write("### Extracted Lesson Information:")
+                                lesson_df = pd.DataFrame(lessons_data)
+                                st.dataframe(lesson_df)
+                                
+                                # Provide download links
+                                csv = get_downloadable_csv(lessons_data)
+                                st.download_button(
+                                    label="Download as CSV",
+                                    data=csv,
+                                    file_name="lesson_data.csv",
+                                    mime="text/csv"
+                                )
+                                
+                                # Text output option
+                                text_output = "\n".join([f"{lesson.get('title', 'No Title')} - {lesson['id']}" 
+                                                       for lesson in lessons_data if 'id' in lesson])
+                                st.download_button(
+                                    label="Download as Text",
+                                    data=text_output,
+                                    file_name="lesson_data.txt",
+                                    mime="text/plain"
+                                )
+                                
+                                # IMSCC creation section
+                                st.write("### Create IMS Common Cartridge")
+                                st.write("""
+                                You can create an IMS Common Cartridge (.imscc) file that contains a page for each lesson.
+                                Each page will have an iframe that loads the lesson content using the base URL you provide.
+                                """)
+                                
+                                base_url = st.text_input(
+                                    "Base URL for iframes (will be combined with lesson IDs)",
+                                    placeholder="https://example.com/rise/scorm/"
+                                )
+                                
+                                custom_title = st.text_input(
+                                    "Course title (optional)",
+                                    value=course_title
+                                )
+                                
+                                iframe_height = st.slider("Default iframe height (px)", 400, 1200, 800, 50)
+                                
+                                if st.button("Create IMSCC Package"):
+                                    if not base_url:
+                                        st.error("Please provide a base URL for the iframes.")
+                                    else:
+                                        # Basic URL validation
+                                        if not (base_url.startswith('http://') or base_url.startswith('https://')):
+                                            st.warning("Base URL should start with http:// or https://")
+                                        
+                                        with st.spinner("Creating IMSCC package..."):
+                                            try:
+                                                # Create a temporary directory for the output
+                                                with tempfile.TemporaryDirectory() as temp_dir:
+                                                    output_path = os.path.join(temp_dir, "rise_course.imscc")
+                                                    
+                                                    # Check if imscc_creator is available
+                                                    if 'imscc_creator' not in sys.modules:
+                                                        st.error("imscc_creator module is not available")
+                                                        st.stop()
+                                                    
+                                                    # Check if the create_package function exists
+                                                    if not hasattr(imscc_creator, 'create_package'):
+                                                        st.error("create_package function not found in imscc_creator module")
+                                                        st.stop()
+                                                    
+                                                    # Create the IMSCC package
+                                                    st.info("Calling imscc_creator.create_package...")
+                                                    extra_args = {"iframe_height": iframe_height}
+                                                    
+                                                    try:
+                                                        imscc_creator.create_package(
+                                                            lessons_data,
+                                                            output_path,
+                                                            base_url,
+                                                            course_title=custom_title,
+                                                            **extra_args
+                                                        )
+                                                    except TypeError:
+                                                        # If the function doesn't accept iframe_height, try without it
+                                                        st.warning("imscc_creator doesn't support iframe_height parameter, using default")
+                                                        imscc_creator.create_package(
+                                                            lessons_data,
+                                                            output_path,
+                                                            base_url,
+                                                            course_title=custom_title
+                                                        )
+                                                    
+                                                    # Read the created file for download
+                                                    if os.path.exists(output_path):
+                                                        with open(output_path, "rb") as f:
+                                                            imscc_bytes = f.read()
+                                                        
+                                                        st.success("IMSCC package created successfully!")
+                                                        st.download_button(
+                                                            label="Download IMSCC Package",
+                                                            data=imscc_bytes,
+                                                            file_name=f"{custom_title.replace(' ', '_')}.imscc",
+                                                            mime="application/zip"
+                                                        )
+                                                        
+                                                        # Description of what was created
+                                                        st.info(f"""
+                                                        The IMSCC package contains {len(lessons_data)} pages, one for each lesson.
+                                                        Each page has an iframe that points to: {base_url}/[lesson_id]
+                                                        
+                                                        This package can be imported into Canvas, Blackboard, Moodle, and other LMS 
+                                                        systems that support IMS Common Cartridge format.
+                                                        """)
+                                                    else:
+                                                        st.error(f"IMSCC file was not created at {output_path}")
+                                            except Exception as e:
+                                                st.error(f"Error creating IMSCC package: {str(e)}")
+                                                st.code(traceback.format_exc())
                             else:
-                                with st.spinner("Creating IMSCC package..."):
-                                    # Create a temporary directory for the output
-                                    with tempfile.TemporaryDirectory() as temp_dir:
-                                        output_path = os.path.join(temp_dir, "rise_course.imscc")
-                                        
-                                        # Create the IMSCC package
-                                        imscc_creator.create_package(
-                                            lessons_data,
-                                            output_path,
-                                            base_url,
-                                            course_title=custom_title
-                                        )
-                                        
-                                        # Read the created file for download
-                                        with open(output_path, "rb") as f:
-                                            imscc_bytes = f.read()
-                                        
-                                        st.success("IMSCC package created successfully!")
-                                        st.download_button(
-                                            label="Download IMSCC Package",
-                                            data=imscc_bytes,
-                                            file_name=f"{custom_title.replace(' ', '_')}.imscc",
-                                            mime="application/zip"
-                                        )
-                                        
-                                        # Description of what was created
-                                        st.info(f"""
-                                        The IMSCC package contains {len(lessons_data)} pages, one for each lesson.
-                                        Each page has an iframe that points to: {base_url}/[lesson_id]
-                                        
-                                        This package can be imported into Canvas, Blackboard, Moodle, and other LMS 
-                                        systems that support IMS Common Cartridge format.
-                                        """)
-                                        
-                                        # Technical details about the package
-                                        with st.expander("Technical Details"):
-                                            st.markdown("""
-                                            ### IMSCC Package Structure
-                                            
-                                            The package contains:
-                                            
-                                            - `imsmanifest.xml`: Describes all content and structure
-                                            - `resources/webcontent/`: Contains HTML pages with iframes
-                                            
-                                            Each HTML page contains an iframe with:
-                                            - Width: 100%
-                                            - Height: 800px
-                                            - No borders
-                                            """)
-                                            
-                                            st.markdown("#### Sample iframe code:")
-                                            st.code(f'<iframe src="{base_url}/[lesson_id]" width="100%" height="800" frameborder="0"></iframe>')
-                                            
-                                            # Display mapping between titles and IDs
-                                            st.markdown("#### Title to ID Mapping:")
-                                            for lesson in lessons_data[:5]:  # Show first 5 as sample
-                                                st.markdown(f"- **{lesson.get('title', 'No Title')}**: `{lesson['id']}`")
-                                            
-                                            if len(lessons_data) > 5:
-                                                st.markdown(f"... and {len(lessons_data) - 5} more")
-                                        
-                                        # Tips for using the IMSCC package
-                                        with st.expander("Tips for Using the IMSCC Package"):
-                                            st.markdown("""
-                                            ### Import Tips
-                                            
-                                            1. **Canvas LMS**: Go to Settings > Import Course Content > Content Type: "Canvas Cartridge 1.x Package"
-                                            
-                                            2. **Blackboard**: Go to Packages and Utilities > Import Package > Import Package
-                                            
-                                            3. **Moodle**: Go to Restore > Upload a backup file > Select file > Restore
-                                            
-                                            ### After Import
-                                            
-                                            - Check that all pages are displaying correctly
-                                            - You may need to adjust iframe height in some LMS systems
-                                            - Some LMS systems may require enabling iframe embedding in security settings
-                                            """)
+                                st.error("No lesson data could be extracted. Please check if this is a valid Rise course file.")
+                        else:
+                            st.error("Failed to decode JSON data from the file.")
+                else:
+                    st.error("Could not extract content from the file. Please ensure this is a valid Rise und.js file.")
+            except Exception as e:
+                st.error(f"Error processing file: {str(e)}")
+                st.code(traceback.format_exc())
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+        st.code(traceback.format_exc())
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Fatal error: {str(e)}")
+        st.code(traceback.format_exc())
