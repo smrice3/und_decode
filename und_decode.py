@@ -5,6 +5,12 @@ import re
 import pandas as pd
 import io
 from collections import Counter
+import os
+import tempfile
+
+# Import the IMSCC creator module
+# Make sure imscc_creator.py is in the same directory as this script
+import imscc_creator
 
 def extract_jsonp_content(file_content):
     """
@@ -238,13 +244,36 @@ def get_downloadable_csv(lessons_data):
     return csv
 
 def main():
-    st.title("Rise Course Lesson Extractor")
+    st.set_page_config(
+        page_title="Rise Course Extractor",
+        page_icon="📚",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    st.title("Rise Course Lesson Extractor & IMSCC Creator")
     
-    st.write("""
-    Upload your Rise course `und.js` file to extract lesson titles and IDs.
+    st.markdown("""
+    ## Extract Rise course content and create LMS-compatible packages
     
-    The file should contain content in the format: `__resolveJsonp("course:und","...")` 
-    where `...` is the base64 encoded course data.
+    This tool helps you:
+    1. **Extract lesson information** from Rise course files
+    2. **Create IMS Common Cartridge packages** for importing into Learning Management Systems
+    3. **Link your Rise content** through iframes in the LMS
+    
+    ### Instructions
+    
+    1. Find the `und.js` file in your published Rise course files
+       - This is typically in the `data/` folder of your exported SCORM package
+       - It contains the encoded course structure and lesson data
+    
+    2. Upload the file using the file uploader below
+    
+    3. The tool will extract lesson information and display it in a table
+    
+    4. Optionally create an IMSCC package by providing a base URL
+       - The base URL will be combined with each lesson ID
+       - Each lesson will be a page with an iframe pointing to the content
     """)
     
     # Add debug mode checkbox
@@ -283,8 +312,13 @@ def main():
                     if lessons_data:
                         st.success(f"Successfully extracted {len(lessons_data)} lessons!")
                         
+                        # Get course title if available
+                        course_title = "Rise Course Export"
+                        if 'title' in json_data:
+                            course_title = json_data['title']
+                        
                         # Display in a table
-                        st.write("Extracted Lesson Information:")
+                        st.write("### Extracted Lesson Information:")
                         lesson_df = pd.DataFrame(lessons_data)
                         st.dataframe(lesson_df)
                         
@@ -306,34 +340,58 @@ def main():
                             file_name="lesson_data.txt",
                             mime="text/plain"
                         )
-                    else:
-                        st.warning("No lesson data found in the file.")
                         
-                        if debug_mode:
-                            # Try to show the raw 'lessons' structure if possible
-                            if 'lessons' in json_data:
-                                st.write("Raw 'lessons' data found but extraction failed:")
-                                st.json(json_data['lessons'][:2])  # Show first 2 items
-                else:
-                    st.error("Failed to decode the base64 content.")
-        else:
-            st.error("Could not find the expected format in the file. Make sure it contains __resolveJsonp(\"course:und\",\"...\")")
-            
-            if debug_mode:
-                # Try alternative pattern search
-                st.write("Trying to find any jsonp pattern...")
-                jsonp_patterns = [
-                    r'__resolveJsonp\(([^,]+),\s*"([^"]+)"\)',
-                    r'__resolveJsonp\(([^)]+)\)',
-                    r'_resolve\w+\(([^)]+)\)'
-                ]
-                
-                for pattern in jsonp_patterns:
-                    matches = re.findall(pattern, file_content)
-                    if matches:
-                        st.write(f"Found potential matches with pattern: {pattern}")
-                        st.write(f"First few matches: {matches[:2]}")
-                        break
-
-if __name__ == "__main__":
-    main()
+                        # IMSCC creation section
+                        st.write("### Create IMS Common Cartridge")
+                        st.write("""
+                        You can create an IMS Common Cartridge (.imscc) file that contains a page for each lesson.
+                        Each page will have an iframe that loads the lesson content using the base URL you provide.
+                        """)
+                        
+                        base_url = st.text_input(
+                            "Base URL for iframes (will be combined with lesson IDs)",
+                            placeholder="https://example.com/rise/scorm/"
+                        )
+                        
+                        custom_title = st.text_input(
+                            "Course title (optional)",
+                            value=course_title
+                        )
+                        
+                        if st.button("Create IMSCC Package"):
+                            if not base_url:
+                                st.error("Please provide a base URL for the iframes.")
+                            else:
+                                with st.spinner("Creating IMSCC package..."):
+                                    # Create a temporary directory for the output
+                                    with tempfile.TemporaryDirectory() as temp_dir:
+                                        output_path = os.path.join(temp_dir, "rise_course.imscc")
+                                        
+                                        # Create the IMSCC package
+                                        imscc_creator.create_package(
+                                            lessons_data,
+                                            output_path,
+                                            base_url,
+                                            course_title=custom_title
+                                        )
+                                        
+                                        # Read the created file for download
+                                        with open(output_path, "rb") as f:
+                                            imscc_bytes = f.read()
+                                        
+                                        st.success("IMSCC package created successfully!")
+                                        st.download_button(
+                                            label="Download IMSCC Package",
+                                            data=imscc_bytes,
+                                            file_name=f"{custom_title.replace(' ', '_')}.imscc",
+                                            mime="application/zip"
+                                        )
+                                        
+                                        # Description of what was created
+                                        st.info(f"""
+                                        The IMSCC package contains {len(lessons_data)} pages, one for each lesson.
+                                        Each page has an iframe that points to: {base_url}/[lesson_id]
+                                        
+                                        This package can be imported into Canvas, Blackboard, Moodle, and other LMS 
+                                        systems that support IMS Common Cartridge format.
+                                        """)
