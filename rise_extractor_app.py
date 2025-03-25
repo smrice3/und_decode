@@ -10,6 +10,14 @@ import tempfile
 import traceback
 import sys
 
+# Set page config first - must be the first Streamlit command
+st.set_page_config(
+    page_title="Rise Course Extractor",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Setup error logging
 st.write("Starting application initialization...")
 
@@ -317,13 +325,6 @@ def get_downloadable_csv(lessons_data):
 
 def main():
     try:
-        st.set_page_config(
-            page_title="Rise Course Extractor",
-            page_icon="📚",
-            layout="wide",
-            initial_sidebar_state="expanded"
-        )
-
         st.title("Rise Course Lesson Extractor & IMSCC Creator")
         
         st.markdown("""
@@ -385,156 +386,3 @@ def main():
                         st.write(f"Base64 content length: {len(base64_content)} bytes")
                         st.write("Base64 preview (first 50 characters):")
                         st.code(base64_content[:50])
-                    
-                    with st.spinner("Decoding and extracting lesson data..."):
-                        # Decode base64 to get JSON
-                        st.info("Decoding base64 content...")
-                        json_data = decode_base64_content(base64_content)
-                        
-                        if json_data:
-                            # Extract lesson titles and IDs with debug info if enabled
-                            st.info("Extracting lesson data...")
-                            lessons_data = extract_lesson_data(json_data, debug=debug_mode)
-                            
-                            if lessons_data:
-                                st.success(f"Successfully extracted {len(lessons_data)} lessons!")
-                                
-                                # Get course title if available
-                                course_title = "Rise Course Export"
-                                if isinstance(json_data, dict) and 'title' in json_data:
-                                    course_title = json_data['title']
-                                
-                                # Display in a table
-                                st.write("### Extracted Lesson Information:")
-                                lesson_df = pd.DataFrame(lessons_data)
-                                st.dataframe(lesson_df)
-                                
-                                # Provide download links
-                                csv = get_downloadable_csv(lessons_data)
-                                st.download_button(
-                                    label="Download as CSV",
-                                    data=csv,
-                                    file_name="lesson_data.csv",
-                                    mime="text/csv"
-                                )
-                                
-                                # Text output option
-                                text_output = "\n".join([f"{lesson.get('title', 'No Title')} - {lesson['id']}" 
-                                                       for lesson in lessons_data if 'id' in lesson])
-                                st.download_button(
-                                    label="Download as Text",
-                                    data=text_output,
-                                    file_name="lesson_data.txt",
-                                    mime="text/plain"
-                                )
-                                
-                                # IMSCC creation section
-                                st.write("### Create IMS Common Cartridge")
-                                st.write("""
-                                You can create an IMS Common Cartridge (.imscc) file that contains a page for each lesson.
-                                Each page will have an iframe that loads the lesson content using the base URL you provide.
-                                """)
-                                
-                                base_url = st.text_input(
-                                    "Base URL for iframes (will be combined with lesson IDs)",
-                                    placeholder="https://example.com/rise/scorm/"
-                                )
-                                
-                                custom_title = st.text_input(
-                                    "Course title (optional)",
-                                    value=course_title
-                                )
-                                
-                                iframe_height = st.slider("Default iframe height (px)", 400, 1200, 800, 50)
-                                
-                                if st.button("Create IMSCC Package"):
-                                    if not base_url:
-                                        st.error("Please provide a base URL for the iframes.")
-                                    else:
-                                        # Basic URL validation
-                                        if not (base_url.startswith('http://') or base_url.startswith('https://')):
-                                            st.warning("Base URL should start with http:// or https://")
-                                        
-                                        with st.spinner("Creating IMSCC package..."):
-                                            try:
-                                                # Create a temporary directory for the output
-                                                with tempfile.TemporaryDirectory() as temp_dir:
-                                                    output_path = os.path.join(temp_dir, "rise_course.imscc")
-                                                    
-                                                    # Check if imscc_creator is available
-                                                    if 'imscc_creator' not in sys.modules:
-                                                        st.error("imscc_creator module is not available")
-                                                        st.stop()
-                                                    
-                                                    # Check if the create_package function exists
-                                                    if not hasattr(imscc_creator, 'create_package'):
-                                                        st.error("create_package function not found in imscc_creator module")
-                                                        st.stop()
-                                                    
-                                                    # Create the IMSCC package
-                                                    st.info("Calling imscc_creator.create_package...")
-                                                    extra_args = {"iframe_height": iframe_height}
-                                                    
-                                                    try:
-                                                        imscc_creator.create_package(
-                                                            lessons_data,
-                                                            output_path,
-                                                            base_url,
-                                                            course_title=custom_title,
-                                                            **extra_args
-                                                        )
-                                                    except TypeError:
-                                                        # If the function doesn't accept iframe_height, try without it
-                                                        st.warning("imscc_creator doesn't support iframe_height parameter, using default")
-                                                        imscc_creator.create_package(
-                                                            lessons_data,
-                                                            output_path,
-                                                            base_url,
-                                                            course_title=custom_title
-                                                        )
-                                                    
-                                                    # Read the created file for download
-                                                    if os.path.exists(output_path):
-                                                        with open(output_path, "rb") as f:
-                                                            imscc_bytes = f.read()
-                                                        
-                                                        st.success("IMSCC package created successfully!")
-                                                        st.download_button(
-                                                            label="Download IMSCC Package",
-                                                            data=imscc_bytes,
-                                                            file_name=f"{custom_title.replace(' ', '_')}.imscc",
-                                                            mime="application/zip"
-                                                        )
-                                                        
-                                                        # Description of what was created
-                                                        st.info(f"""
-                                                        The IMSCC package contains {len(lessons_data)} pages, one for each lesson.
-                                                        Each page has an iframe that points to: {base_url}/[lesson_id]
-                                                        
-                                                        This package can be imported into Canvas, Blackboard, Moodle, and other LMS 
-                                                        systems that support IMS Common Cartridge format.
-                                                        """)
-                                                    else:
-                                                        st.error(f"IMSCC file was not created at {output_path}")
-                                            except Exception as e:
-                                                st.error(f"Error creating IMSCC package: {str(e)}")
-                                                st.code(traceback.format_exc())
-                            else:
-                                st.error("No lesson data could be extracted. Please check if this is a valid Rise course file.")
-                        else:
-                            st.error("Failed to decode JSON data from the file.")
-                else:
-                    st.error("Could not extract content from the file. Please ensure this is a valid Rise und.js file.")
-            except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
-                st.code(traceback.format_exc())
-    except Exception as e:
-        st.error(f"Application error: {str(e)}")
-        st.code(traceback.format_exc())
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"Fatal error: {str(e)}")
-        st.code(traceback.format_exc())
