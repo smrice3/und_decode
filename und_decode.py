@@ -395,3 +395,48 @@ def main():
                                         This package can be imported into Canvas, Blackboard, Moodle, and other LMS 
                                         systems that support IMS Common Cartridge format.
                                         """)
+                                        
+                                        # Technical details about the package
+                                        with st.expander("Technical Details"):
+                                            st.markdown("""
+                                            ### IMSCC Package Structure
+                                            
+                                            The package contains:
+                                            
+                                            - `imsmanifest.xml`: Describes all content and structure
+                                            - `resources/webcontent/`: Contains HTML pages with iframes
+                                            
+                                            Each HTML page contains an iframe with:
+                                            - Width: 100%
+                                            - Height: 800px
+                                            - No borders
+                                            """)
+                                            
+                                            st.markdown("#### Sample iframe code:")
+                                            st.code(f'<iframe src="{base_url}/[lesson_id]" width="100%" height="800" frameborder="0"></iframe>')
+                                            
+                                            # Display mapping between titles and IDs
+                                            st.markdown("#### Title to ID Mapping:")
+                                            for lesson in lessons_data[:5]:  # Show first 5 as sample
+                                                st.markdown(f"- **{lesson.get('title', 'No Title')}**: `{lesson['id']}`")
+                                            
+                                            if len(lessons_data) > 5:
+                                                st.markdown(f"... and {len(lessons_data) - 5} more")
+                                        
+                                        # Tips for using the IMSCC package
+                                        with st.expander("Tips for Using the IMSCC Package"):
+                                            st.markdown("""
+                                            ### Import Tips
+                                            
+                                            1. **Canvas LMS**: Go to Settings > Import Course Content > Content Type: "Canvas Cartridge 1.x Package"
+                                            
+                                            2. **Blackboard**: Go to Packages and Utilities > Import Package > Import Package
+                                            
+                                            3. **Moodle**: Go to Restore > Upload a backup file > Select file > Restore
+                                            
+                                            ### After Import
+                                            
+                                            - Check that all pages are displaying correctly
+                                            - You may need to adjust iframe height in some LMS systems
+                                            - Some LMS systems may require enabling iframe embedding in security settings
+                                            """)
