@@ -177,7 +177,7 @@ def create_directory_structure(base_dir):
     
     return paths
 
-# Update the manifest creation function for Canvas format
+# Update the manifest creation function to use titles for filenames
 def create_manifest(paths, course_title, lessons, org_id="org_1"):
     """
     Create the imsmanifest.xml file needed for the IMSCC package in Canvas format
@@ -257,8 +257,15 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
         item_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
         resource_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
         
-        # Use Canvas naming pattern for files
-        filename = re.sub(r'[^a-zA-Z0-9\-]', '-', lesson_title.lower()) + '.html'
+        # Use the title to create the filename
+        # Convert to lowercase, replace spaces and special chars with hyphens
+        filename = lesson_title.lower()
+        # Replace spaces and special characters with hyphens
+        filename = re.sub(r'[^a-z0-9]+', '-', filename)
+        # Remove leading/trailing hyphens
+        filename = filename.strip('-')
+        # Add .html extension
+        filename = filename + '.html'
         
         # Store filenames for later use
         lesson['filename'] = filename
@@ -306,31 +313,7 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
     
     return manifest_path
 
-# Create Canvas-specific course settings
-def create_canvas_settings(paths, course_title):
-    """
-    Create Canvas-specific course settings files
-    
-    Args:
-        paths (dict): Directory paths
-        course_title (str): Title of the course
-    """
-    # Create canvas_export.txt
-    with open(os.path.join(paths['course_settings'], 'canvas_export.txt'), 'w', encoding='utf-8') as f:
-        f.write("Canvas Course Export")
-    
-    # Create minimal course_settings.xml
-    course_settings = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    course_settings += '<course identifier="default_identifier" xmlns="http://canvas.instructure.com/xsd/cccv1p0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://canvas.instructure.com/xsd/cccv1p0 https://canvas.instructure.com/xsd/cccv1p0.xsd">\n'
-    course_settings += f'  <title>{html.escape(course_title)}</title>\n'
-    course_settings += '  <course_code>Imported Course</course_code>\n'
-    course_settings += '  <visibility>private</visibility>\n'
-    course_settings += '</course>\n'
-    
-    with open(os.path.join(paths['course_settings'], 'course_settings.xml'), 'w', encoding='utf-8') as f:
-        f.write(course_settings)
-
-# Update the page creation function
+# Update the page creation function to preserve title consistency
 def create_lesson_pages(paths, lessons, base_url):
     """
     Create HTML pages for each lesson with an iframe in Canvas format
@@ -348,7 +331,13 @@ def create_lesson_pages(paths, lessons, base_url):
     for lesson in lessons:
         lesson_id = lesson['id']
         lesson_title = lesson.get('title', 'Untitled Lesson')
-        filename = lesson.get('filename', re.sub(r'[^a-zA-Z0-9\-]', '-', lesson_title.lower()) + '.html')
+        filename = lesson.get('filename')
+        
+        # If filename wasn't set in the manifest creation, create it here (fallback)
+        if not filename:
+            filename = lesson_title.lower()
+            filename = re.sub(r'[^a-z0-9]+', '-', filename)
+            filename = filename.strip('-') + '.html'
         
         file_path = os.path.join(paths['wiki_content'], filename)
         
@@ -359,7 +348,6 @@ def create_lesson_pages(paths, lessons, base_url):
         iframe_url += lesson_id
         
         # Create HTML content with iframe in Canvas-compatible format
-        # Canvas requires well-formed HTML pages with doctype
         html_content = '<!DOCTYPE html>\n'
         html_content += '<html>\n'
         html_content += '<head>\n'
