@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-IMSCC Creator Module for Rise Lesson Data
+Standalone IMSCC Creator for Rise Lesson Data
 
-This module creates an IMS Common Cartridge (.imscc) package from a list of
+This script creates an IMS Common Cartridge (.imscc) package from a list of
 lesson data. Each lesson becomes a page in the package with an iframe that 
 loads content based on the lesson ID and a provided base URL.
+
+Usage:
+  python imscc_creator.py --input lesson_data.json --output course.imscc --base-url https://example.com/rise/
+  python imscc_creator.py --input lesson_data.csv --output course.imscc --base-url https://example.com/rise/
+  python imscc_creator.py --extract und.js --output course.imscc --base-url https://example.com/rise/
 """
 
 import os
@@ -16,7 +21,131 @@ import html
 import re
 import argparse
 import json
+import csv
+import base64
 from datetime import datetime
+
+
+def extract_jsonp_content(file_path):
+    """
+    Extract the base64 encoded content from a Rise und.js file.
+    
+    Args:
+        file_path (str): Path to the und.js file
+    
+    Returns:
+        str: Extracted base64 content or None if not found
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            file_content = file.read()
+        
+        # Pattern to match __resolveJsonp("course:und","....") format
+        pattern = r'__resolveJsonp\("course:und","([^"]+)"\)'
+        match = re.search(pattern, file_content)
+        
+        if match:
+            return match.group(1)
+        
+        # Try more flexible pattern as fallback
+        alternative_pattern = r'__resolveJsonp\([^,]+,\s*"([^"]+)"\)'
+        alt_match = re.search(alternative_pattern, file_content)
+        if alt_match:
+            print("Using alternative pattern for extraction")
+            return alt_match.group(1)
+        
+        print("Could not find the expected format in the file.")
+        return None
+    except Exception as e:
+        print(f"Error reading file: {str(e)}")
+        return None
+
+
+def decode_base64_content(base64_content):
+    """
+    Decode base64 content to JSON.
+    
+    Args:
+        base64_content (str): Base64 encoded content
+    
+    Returns:
+        dict: Decoded JSON data or None if decoding fails
+    """
+    try:
+        # Decode base64 to get JSON string
+        decoded_bytes = base64.b64decode(base64_content)
+        json_str = decoded_bytes.decode('utf-8')
+        
+        # Parse JSON string
+        json_data = json.loads(json_str)
+        return json_data
+    except Exception as e:
+        print(f"Error decoding content: {str(e)}")
+        return None
+
+
+def extract_lesson_data(json_data):
+    """
+    Extract lesson titles and IDs from the decoded JSON data.
+    
+    Args:
+        json_data (dict): The decoded JSON data
+    
+    Returns:
+        list: List of dictionaries containing title and id for each lesson
+    """
+    lessons_data = []
+    lessons = None
+    
+    # Method 1: Direct lookup for 'lessons' key
+    if 'lessons' in json_data:
+        lessons = json_data['lessons']
+        print(f"Found direct 'lessons' key with {len(lessons)} items")
+    
+    # Method 2: Look for arrays that might contain lessons
+    if not lessons:
+        candidates = []
+        for key, value in json_data.items():
+            if isinstance(value, list) and len(value) > 0:
+                # Check first few items to see if they look like lessons
+                sample_size = min(5, len(value))
+                sample_items = value[:sample_size]
+                
+                has_title_id = sum(1 for item in sample_items 
+                                 if isinstance(item, dict) and 'title' in item and 'id' in item)
+                
+                if has_title_id > 0:
+                    candidates.append((key, value, has_title_id/sample_size))
+        
+        # Sort candidates by the proportion that have title and id
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        
+        if candidates:
+            best_candidate = candidates[0]
+            lessons = best_candidate[1]
+            print(f"Found potential lessons array in '{best_candidate[0]}' with {len(lessons)} items")
+    
+    # Extract data from the lessons if found
+    if lessons:
+        for lesson in lessons:
+            if isinstance(lesson, dict):
+                lesson_data = {}
+                
+                # Always include id and title if available
+                if 'id' in lesson:
+                    lesson_data['id'] = lesson['id']
+                if 'title' in lesson:
+                    lesson_data['title'] = lesson['title']
+                
+                # Only add if we have at least an id
+                if 'id' in lesson_data:
+                    lessons_data.append(lesson_data)
+    
+    # If no lessons found, show error
+    if not lessons_data:
+        print("No lesson data could be extracted")
+    
+    return lessons_data
 
 
 def create_directory_structure(base_dir):
@@ -221,6 +350,61 @@ def create_imscc_package(paths, output_path):
     return output_path
 
 
+def load_lessons_from_file(file_path):
+    """
+    Load lesson data from a CSV or JSON file
+    
+    Args:
+        file_path (str): Path to the CSV or JSON file
+        
+    Returns:
+        list: List of lesson dictionaries containing 'id' and 'title'
+    """
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    # Load JSON file
+    if file_ext == '.json':
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # If data is a list, assume it's already in the correct format
+            if isinstance(data, list):
+                return data
+            
+            # If data has a 'lessons' key, extract that
+            if isinstance(data, dict) and 'lessons' in data:
+                return data['lessons']
+            
+            # Otherwise, return empty list
+            return []
+        except Exception as e:
+            print(f"Error loading JSON file: {str(e)}")
+            return []
+    
+    # Load CSV file
+    elif file_ext == '.csv':
+        try:
+            lessons = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if 'id' in row:
+                        lesson = {'id': row['id']}
+                        if 'title' in row:
+                            lesson['title'] = row['title']
+                        lessons.append(lesson)
+            return lessons
+        except Exception as e:
+            print(f"Error loading CSV file: {str(e)}")
+            return []
+    
+    # Unsupported file type
+    else:
+        print(f"Unsupported file type: {file_ext}")
+        return []
+
+
 def create_package(lessons, output_path, base_url, course_title=None, clean_temp=True):
     """
     Main function to create an IMSCC package from lesson data
@@ -263,41 +447,3 @@ def create_package(lessons, output_path, base_url, course_title=None, clean_temp
         # Clean up temporary files if requested
         if clean_temp and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-
-
-def main():
-    """
-    Main function when script is run directly
-    """
-    parser = argparse.ArgumentParser(description='Create an IMSCC package from lesson data')
-    parser.add_argument('--lessons', '-l', required=True, help='JSON file or JSON string with lesson data')
-    parser.add_argument('--output', '-o', required=True, help='Output path for the IMSCC file')
-    parser.add_argument('--base-url', '-u', required=True, help='Base URL to combine with lesson IDs')
-    parser.add_argument('--title', '-t', default="Rise Course Export", help='Course title')
-    
-    args = parser.parse_args()
-    
-    # Load lessons data
-    try:
-        # First try to parse as a JSON string
-        lessons = json.loads(args.lessons)
-    except json.JSONDecodeError:
-        # If that fails, try to load as a JSON file
-        try:
-            with open(args.lessons, 'r', encoding='utf-8') as f:
-                lessons = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            print("Error: Could not parse lessons data. Provide valid JSON or a JSON file path.")
-            sys.exit(1)
-    
-    # Ensure lessons is a list
-    if not isinstance(lessons, list):
-        print("Error: Lessons data must be a list of lesson objects.")
-        sys.exit(1)
-    
-    # Create the IMSCC package
-    create_package(lessons, args.output, args.base_url, args.title)
-
-
-if __name__ == "__main__":
-    main()
