@@ -21,6 +21,7 @@ import html
 import re
 import argparse
 import json
+import hashlib
 import csv
 import base64
 from datetime import datetime
