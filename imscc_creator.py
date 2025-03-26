@@ -151,9 +151,10 @@ def extract_lesson_data(json_data):
     return lessons_data
 
 
+# Update the directory structure creation function
 def create_directory_structure(base_dir):
     """
-    Create the directory structure required for an IMSCC package
+    Create the directory structure required for a Canvas-compatible IMSCC package
     
     Args:
         base_dir (str): Base directory where the structure will be created
@@ -164,11 +165,11 @@ def create_directory_structure(base_dir):
     # Ensure base directory exists
     os.makedirs(base_dir, exist_ok=True)
     
-    # Create required directories
+    # Create required directories for Canvas
     paths = {
         'root': base_dir,
-        'resources': os.path.join(base_dir, 'resources'),
-        'webcontent': os.path.join(base_dir, 'resources', 'webcontent')
+        'wiki_content': os.path.join(base_dir, 'wiki_content'),  # Canvas expects pages in wiki_content
+        'course_settings': os.path.join(base_dir, 'course_settings'),
     }
     
     for path in paths.values():
@@ -176,10 +177,10 @@ def create_directory_structure(base_dir):
     
     return paths
 
-
-def create_manifest(paths, course_title, lessons, org_id="RiseExport"):
+# Update the manifest creation function for Canvas format
+def create_manifest(paths, course_title, lessons, org_id="org_1"):
     """
-    Create the imsmanifest.xml file needed for the IMSCC package
+    Create the imsmanifest.xml file needed for the IMSCC package in Canvas format
     
     Args:
         paths (dict): Directory paths
@@ -192,10 +193,10 @@ def create_manifest(paths, course_title, lessons, org_id="RiseExport"):
     """
     manifest_path = os.path.join(paths['root'], 'imsmanifest.xml')
     
-    # Generate unique identifiers
+    # Generate unique identifiers for Canvas
     course_id = "course_" + str(uuid.uuid4()).replace('-', '')
     
-    # Start building manifest XML
+    # Start building manifest XML with Canvas-compatible format
     manifest = '<?xml version="1.0" encoding="UTF-8"?>\n'
     manifest += '<manifest identifier="{}" '.format(course_id)
     manifest += 'xmlns="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1" '
@@ -203,13 +204,13 @@ def create_manifest(paths, course_title, lessons, org_id="RiseExport"):
     manifest += 'xmlns:lomimscc="http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest" '
     manifest += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
     manifest += 'xsi:schemaLocation="http://www.imsglobal.org/xsd/imsccv1p1/imscp_v1p1 '
-    manifest += 'http://www.imsglobal.org/xsd/imscp_v1p1.xsd '
+    manifest += 'http://www.imsglobal.org/profile/cc/ccv1p1/ccv1p1_imscp_v1p2_v1p0.xsd '
     manifest += 'http://ltsc.ieee.org/xsd/imsccv1p1/LOM/resource '
     manifest += 'http://www.imsglobal.org/profile/cc/ccv1p1/LOM/ccv1p1_lomresource_v1p0.xsd '
     manifest += 'http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest '
     manifest += 'http://www.imsglobal.org/profile/cc/ccv1p1/LOM/ccv1p1_lommanifest_v1p0.xsd">\n'
     
-    # Metadata
+    # Metadata section in Canvas format
     manifest += '  <metadata>\n'
     manifest += '    <schema>IMS Common Cartridge</schema>\n'
     manifest += '    <schemaversion>1.1.0</schemaversion>\n'
@@ -219,46 +220,78 @@ def create_manifest(paths, course_title, lessons, org_id="RiseExport"):
     manifest += '          <lomimscc:string>{}</lomimscc:string>\n'.format(html.escape(course_title))
     manifest += '        </lomimscc:title>\n'
     manifest += '      </lomimscc:general>\n'
+    manifest += '      <lomimscc:lifeCycle>\n'
+    manifest += '        <lomimscc:contribute>\n'
+    manifest += '          <lomimscc:date>\n'
+    manifest += '            <lomimscc:dateTime>{}</lomimscc:dateTime>\n'.format(datetime.now().strftime("%Y-%m-%d"))
+    manifest += '          </lomimscc:date>\n'
+    manifest += '        </lomimscc:contribute>\n'
+    manifest += '      </lomimscc:lifeCycle>\n'
+    manifest += '      <lomimscc:rights>\n'
+    manifest += '        <lomimscc:copyrightAndOtherRestrictions>\n'
+    manifest += '          <lomimscc:value>yes</lomimscc:value>\n'
+    manifest += '        </lomimscc:copyrightAndOtherRestrictions>\n'
+    manifest += '        <lomimscc:description>\n'
+    manifest += '          <lomimscc:string>Private (Copyrighted) - http://en.wikipedia.org/wiki/Copyright</lomimscc:string>\n'
+    manifest += '        </lomimscc:description>\n'
+    manifest += '      </lomimscc:rights>\n'
     manifest += '    </lomimscc:lom>\n'
     manifest += '  </metadata>\n'
     
-    # Organizations
+    # Organizations section in Canvas format
     manifest += '  <organizations>\n'
     manifest += '    <organization identifier="{}" structure="rooted-hierarchy">\n'.format(org_id)
-    manifest += '      <item identifier="root">\n'
+    manifest += '      <item identifier="LearningModules">\n'
+    
+    # Add module for the lessons
+    module_id = "module_" + str(uuid.uuid4()).replace('-', '')
+    manifest += '        <item identifier="{}">\n'.format(module_id)
+    manifest += '          <title>{}</title>\n'.format(html.escape(course_title))
     
     # Add items for each lesson
     for lesson in lessons:
         lesson_id = lesson['id']
         lesson_title = lesson.get('title', 'Untitled Lesson')
         
-        # Create a sanitized identifier for the manifest
-        item_id = "item_" + re.sub(r'[^a-zA-Z0-9]', '_', lesson_id)
-        resource_id = "resource_" + re.sub(r'[^a-zA-Z0-9]', '_', lesson_id)
+        # Create Canvas-style identifiers
+        item_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
+        resource_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
         
-        manifest += '        <item identifier="{}" identifierref="{}">\n'.format(item_id, resource_id)
-        manifest += '          <title>{}</title>\n'.format(html.escape(lesson_title))
-        manifest += '        </item>\n'
+        # Use Canvas naming pattern for files
+        filename = re.sub(r'[^a-zA-Z0-9\-]', '-', lesson_title.lower()) + '.html'
+        
+        # Store filenames for later use
+        lesson['filename'] = filename
+        lesson['resource_id'] = resource_id
+        
+        manifest += '          <item identifier="{}" identifierref="{}">\n'.format(item_id, resource_id)
+        manifest += '            <title>{}</title>\n'.format(html.escape(lesson_title))
+        manifest += '          </item>\n'
     
+    # Close organization structure
+    manifest += '        </item>\n'
     manifest += '      </item>\n'
     manifest += '    </organization>\n'
     manifest += '  </organizations>\n'
     
-    # Resources
+    # Resources section in Canvas format
     manifest += '  <resources>\n'
+    
+    # Add course settings resource for Canvas
+    settings_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
+    manifest += '    <resource identifier="{}" type="associatedcontent/imscc_xmlv1p1/learning-application-resource" href="course_settings/canvas_export.txt">\n'.format(settings_id)
+    manifest += '      <file href="course_settings/course_settings.xml"/>\n'
+    manifest += '      <file href="course_settings/canvas_export.txt"/>\n'
+    manifest += '    </resource>\n'
     
     # Add resource for each lesson
     for lesson in lessons:
-        lesson_id = lesson['id']
-        lesson_title = lesson.get('title', 'Untitled Lesson')
+        resource_id = lesson['resource_id']
+        filename = lesson['filename']
         
-        # Create a sanitized identifier for the manifest
-        resource_id = "resource_" + re.sub(r'[^a-zA-Z0-9]', '_', lesson_id)
-        filename = re.sub(r'[^a-zA-Z0-9]', '_', lesson_id) + '.html'
-        
-        manifest += '    <resource identifier="{}" type="webcontent" href="resources/webcontent/{}">\n'.format(
+        manifest += '    <resource identifier="{}" type="webcontent" href="wiki_content/{}">\n'.format(
             resource_id, filename)
-        manifest += '      <file href="resources/webcontent/{}"/>\n'.format(filename)
+        manifest += '      <file href="wiki_content/{}"/>\n'.format(filename)
         manifest += '    </resource>\n'
     
     manifest += '  </resources>\n'
@@ -268,12 +301,39 @@ def create_manifest(paths, course_title, lessons, org_id="RiseExport"):
     with open(manifest_path, 'w', encoding='utf-8') as f:
         f.write(manifest)
     
+    # Create course settings file for Canvas
+    create_canvas_settings(paths, course_title)
+    
     return manifest_path
 
+# Create Canvas-specific course settings
+def create_canvas_settings(paths, course_title):
+    """
+    Create Canvas-specific course settings files
+    
+    Args:
+        paths (dict): Directory paths
+        course_title (str): Title of the course
+    """
+    # Create canvas_export.txt
+    with open(os.path.join(paths['course_settings'], 'canvas_export.txt'), 'w', encoding='utf-8') as f:
+        f.write("Canvas Course Export")
+    
+    # Create minimal course_settings.xml
+    course_settings = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    course_settings += '<course identifier="default_identifier" xmlns="http://canvas.instructure.com/xsd/cccv1p0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://canvas.instructure.com/xsd/cccv1p0 https://canvas.instructure.com/xsd/cccv1p0.xsd">\n'
+    course_settings += f'  <title>{html.escape(course_title)}</title>\n'
+    course_settings += '  <course_code>Imported Course</course_code>\n'
+    course_settings += '  <visibility>private</visibility>\n'
+    course_settings += '</course>\n'
+    
+    with open(os.path.join(paths['course_settings'], 'course_settings.xml'), 'w', encoding='utf-8') as f:
+        f.write(course_settings)
 
+# Update the page creation function
 def create_lesson_pages(paths, lessons, base_url):
     """
-    Create HTML pages for each lesson with an iframe
+    Create HTML pages for each lesson with an iframe in Canvas format
     
     Args:
         paths (dict): Directory paths
@@ -288,10 +348,9 @@ def create_lesson_pages(paths, lessons, base_url):
     for lesson in lessons:
         lesson_id = lesson['id']
         lesson_title = lesson.get('title', 'Untitled Lesson')
+        filename = lesson.get('filename', re.sub(r'[^a-zA-Z0-9\-]', '-', lesson_title.lower()) + '.html')
         
-        # Create a safe filename
-        filename = re.sub(r'[^a-zA-Z0-9]', '_', lesson_id) + '.html'
-        file_path = os.path.join(paths['webcontent'], filename)
+        file_path = os.path.join(paths['wiki_content'], filename)
         
         # Format the iframe URL
         iframe_url = base_url
@@ -299,19 +358,27 @@ def create_lesson_pages(paths, lessons, base_url):
             iframe_url += '/'
         iframe_url += lesson_id
         
-        # Create HTML content with iframe
+        # Create HTML content with iframe in Canvas-compatible format
+        # Canvas requires well-formed HTML pages with doctype
         html_content = '<!DOCTYPE html>\n'
         html_content += '<html>\n'
         html_content += '<head>\n'
         html_content += '  <meta charset="UTF-8">\n'
-        html_content += '  <title>{}</title>\n'.format(html.escape(lesson_title))
+        html_content += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        html_content += f'  <title>{html.escape(lesson_title)}</title>\n'
         html_content += '  <style>\n'
-        html_content += '    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }\n'
-        html_content += '    iframe { border: none; width: 100%; height: 800px; }\n'
+        html_content += '    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; }\n'
+        html_content += '    h1 { color: #333; margin-bottom: 20px; }\n'
+        html_content += '    .iframe-container { width: 100%; height: 800px; border: 1px solid #ddd; margin: 20px 0; }\n'
+        html_content += '    iframe { border: none; width: 100%; height: 100%; }\n'
         html_content += '  </style>\n'
         html_content += '</head>\n'
         html_content += '<body>\n'
-        html_content += '  <iframe src="{}" allowfullscreen></iframe>\n'.format(html.escape(iframe_url))
+        html_content += f'  <h1>{html.escape(lesson_title)}</h1>\n'
+        html_content += '  <div class="iframe-container">\n'
+        html_content += f'    <iframe src="{html.escape(iframe_url)}" allowfullscreen></iframe>\n'
+        html_content += '  </div>\n'
+        html_content += '  <p><small>This content is embedded from an external source.</small></p>\n'
         html_content += '</body>\n'
         html_content += '</html>\n'
         
