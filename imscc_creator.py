@@ -204,6 +204,7 @@ def create_canvas_settings(paths, course_title):
 def create_manifest(paths, course_title, lessons, org_id="org_1"):
     """
     Create the imsmanifest.xml file needed for the IMSCC package in Canvas format
+    with proper matching identifiers between organization items and resources.
     
     Args:
         paths (dict): Directory paths
@@ -216,7 +217,7 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
     """
     manifest_path = os.path.join(paths['root'], 'imsmanifest.xml')
     
-    # Generate unique identifiers for Canvas
+    # Generate unique identifier for Canvas
     course_id = "course_" + str(uuid.uuid4()).replace('-', '')
     
     # Start building manifest XML with Canvas-compatible format
@@ -267,18 +268,23 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
     manifest += '      <item identifier="LearningModules">\n'
     
     # Add module for the lessons
-    module_id = "module_" + str(uuid.uuid4()).replace('-', '')
+    module_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
     manifest += '        <item identifier="{}">\n'.format(module_id)
     manifest += '          <title>{}</title>\n'.format(html.escape(course_title))
     
-    # Add items for each lesson
+    # Process each lesson and generate necessary IDs up front
     for lesson in lessons:
         lesson_id = lesson['id']
         lesson_title = lesson.get('title', 'Untitled Lesson')
         
-        # Create Canvas-style identifiers
-        item_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
-        resource_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', str(uuid.uuid4()))
+        # Create stable, unique resource ID for this lesson 
+        # Use a deterministic approach based on the lesson ID to ensure consistency
+        resource_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', 
+                                   hashlib.md5(lesson_id.encode('utf-8')).hexdigest()[:24])
+        
+        # Create item ID that's different from resource ID
+        item_id = "g" + re.sub(r'[^a-zA-Z0-9]', '', 
+                               hashlib.md5((lesson_id + "_item").encode('utf-8')).hexdigest()[:24])
         
         # Use the title to create the filename
         # Convert to lowercase, replace spaces and special chars with hyphens
@@ -290,10 +296,12 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
         # Add .html extension
         filename = filename + '.html'
         
-        # Store filenames for later use
+        # Store IDs and filename for later use in resources section
         lesson['filename'] = filename
         lesson['resource_id'] = resource_id
+        lesson['item_id'] = item_id
         
+        # Add item to organizations section
         manifest += '          <item identifier="{}" identifierref="{}">\n'.format(item_id, resource_id)
         manifest += '            <title>{}</title>\n'.format(html.escape(lesson_title))
         manifest += '          </item>\n'
@@ -314,9 +322,9 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
     manifest += '      <file href="course_settings/canvas_export.txt"/>\n'
     manifest += '    </resource>\n'
     
-    # Add resource for each lesson
+    # Add resource for each lesson using the same resource_id that was referenced in the organizations section
     for lesson in lessons:
-        resource_id = lesson['resource_id']
+        resource_id = lesson['resource_id']  # Use the same ID that was referenced earlier
         filename = lesson['filename']
         
         manifest += '    <resource identifier="{}" type="webcontent" href="wiki_content/{}">\n'.format(
@@ -327,8 +335,8 @@ def create_manifest(paths, course_title, lessons, org_id="org_1"):
     manifest += '  </resources>\n'
     manifest += '</manifest>\n'
     
-    # Write manifest to file
-    with open(manifest_path, 'w', encoding='utf-8') as f:
+    # Write manifest to file - ensure no BOM and clean beginning
+    with open(manifest_path, 'w', encoding='utf-8', newline='') as f:
         f.write(manifest)
     
     # Create course settings file for Canvas
