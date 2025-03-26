@@ -1,4 +1,13 @@
+# Set page configuration MUST be the first Streamlit command
 import streamlit as st
+st.set_page_config(
+    page_title="Rise IMSCC Creator",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Now import other libraries
 import os
 import tempfile
 import base64
@@ -11,20 +20,14 @@ import io
 # Import the IMSCC creator module - make sure imscc_creator.py is in the same directory
 import imscc_creator
 
-# Set page configuration
-st.set_page_config(
-    page_title="Rise IMSCC Creator",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # Main title and description
 st.title("Rise Course IMSCC Creator")
 st.markdown("""
 This tool helps you create IMS Common Cartridge packages from Rise course lesson data.
 Upload your data, provide a base URL, and download an IMSCC package ready to import into your LMS.
 """)
+
+# Rest of your code...
 
 # Create tabs for different input methods
 tab1, tab2, tab3 = st.tabs(["Extract from und.js", "Upload CSV", "Upload JSON"])
