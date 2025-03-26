@@ -25,6 +25,9 @@ import csv
 import base64
 from datetime import datetime
 
+import streamlit as st
+st.title("IMSCC Creator")
+st.write("This application is running. If you can see this, the script is loaded correctly.")
 
 def extract_jsonp_content(file_path):
     """
