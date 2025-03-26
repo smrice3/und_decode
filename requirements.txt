@@ -25,3 +25,16 @@ pathlib>=1.0.1; python_version < '3.5'
 
 # For command-line interface
 argparse>=1.4.0
+
+os
+sys
+shutil
+zipfile
+uuid
+html
+re
+argparse
+json
+csv
+base64
+datetime
