@@ -177,6 +177,29 @@ def create_directory_structure(base_dir):
     
     return paths
 
+def create_canvas_settings(paths, course_title):
+    """
+    Create Canvas-specific course settings files
+    
+    Args:
+        paths (dict): Directory paths
+        course_title (str): Title of the course
+    """
+    # Create canvas_export.txt
+    with open(os.path.join(paths['course_settings'], 'canvas_export.txt'), 'w', encoding='utf-8') as f:
+        f.write("Canvas Course Export")
+    
+    # Create minimal course_settings.xml
+    course_settings = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    course_settings += '<course identifier="default_identifier" xmlns="http://canvas.instructure.com/xsd/cccv1p0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://canvas.instructure.com/xsd/cccv1p0 https://canvas.instructure.com/xsd/cccv1p0.xsd">\n'
+    course_settings += f'  <title>{html.escape(course_title)}</title>\n'
+    course_settings += '  <course_code>Imported Course</course_code>\n'
+    course_settings += '  <visibility>private</visibility>\n'
+    course_settings += '</course>\n'
+    
+    with open(os.path.join(paths['course_settings'], 'course_settings.xml'), 'w', encoding='utf-8') as f:
+        f.write(course_settings)
+
 # Update the manifest creation function to use titles for filenames
 def create_manifest(paths, course_title, lessons, org_id="org_1"):
     """
